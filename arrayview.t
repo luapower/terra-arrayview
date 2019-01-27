@@ -1,11 +1,13 @@
+--[[
 
---Array view type for Terra.
---Written by Cosmin Apreutesei. Public domain.
+	Array view type for Terra.
+	Written by Cosmin Apreutesei. Public domain.
 
---[[  API
+	An array view maps the idea of an array onto any memory location.
 
-	v: arrayview(T,[cmp],[size_t=int32],[C=require'low'])
+	v: arrayview{T=,[cmp=],[size_t=int32],[C=require'low']}
 	v = arrayview(T,[cmp],[size_t=int32])
+	v = arrayview(T,p,len,[cmp],[size_t=int32])
 	v:fromcstring(cstring) -> self
 	v.elements
 	v.len
@@ -36,6 +38,7 @@
 	v:indexof(&v[,default]) -> i|default
 	v:next([default]) -> &v|default
 	v:prev([default]) -> &v|default
+
 ]]
 
 if not ... then require'arrayview_test'; return end
@@ -244,17 +247,17 @@ local function view_type(T, cmp, size_t, C)
 	--hashing using the default hash function
 
 	if hash then
-		view.metamethods.__hash32 = macro(function(self, d)
+		view.methods.__hash32 = macro(function(self, d)
 			return `hash(uint32, self.elements, self.len * sizeof(T), [d or 0])
 		end)
-		view.metamethods.__hash64 = macro(function(self, d)
+		view.methods.__hash64 = macro(function(self, d)
 			return `hash(uint64, self.elements, self.len * sizeof(T), [d or 0])
 		end)
 	end
 
 	--memsize for caches and debugging
 
-	terra view.metamethods.__memsize(self: &view): size_t
+	terra view:__memsize(): size_t
 		return sizeof(view) + sizeof(T) * self.len
 	end
 
