@@ -323,11 +323,11 @@ local function view_type(T, cmp, size_t, C)
 	end
 	--expose comparators as virtual fields of the view.
 	if lt then
-		local props = addproperties(view)
-		props.lt = macro(function() return lt  end)
-		props.gt = macro(function() return gt  end)
-		props.le = macro(function() return le end)
-		props.ge = macro(function() return ge end)
+		addproperties(view)
+		view.properties.lt = macro(function() return lt  end)
+		view.properties.gt = macro(function() return gt  end)
+		view.properties.le = macro(function() return le end)
+		view.properties.ge = macro(function() return ge end)
 	end
 
 	view.methods.binsearch = overload('binsearch', {})
