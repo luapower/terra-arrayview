@@ -484,12 +484,12 @@ return macro(
 	--calling it from Terra returns a new view.
 	function(arg1, ...)
 		local T, lval, len, cmp, size_t
-		if arg1 and arg1:islvalue() then --wrap raw pointer: arrayview(&v, len, cmp, size_t)
+		if arg1 and arg1:islvalue() then --wrap raw pointer: arrayview(&t, len, ...)
 			lval, len, cmp, size_t = arg1, ...
 			T = lval:gettype()
 			assert(T:ispointer())
 			T = T.type
-		else --create new view: arrayview(T, cmp, size_t)
+		else --create new view: arrayview(T, ...)
 			T, cmp, size_t = arg1, ...
 			T = T and T:astype()
 		end
