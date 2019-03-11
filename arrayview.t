@@ -5,105 +5,100 @@
 
 	An array view maps the idea of an array onto any memory location.
 
-	v: arrayview{T=,[cmp=],[size_t=int32],[C=require'low']}
-	v = arrayview(T,[cmp],[size_t=int32])
-	v = arrayview(T,p,len,[cmp],[size_t=int32])
-	v:fromcstring(cstring) -> self
-	v.elements
-	v.len
-	v1 <|<=|==|>=|>|~= v2
+	local V = arrayview{T=,[cmp=],[size_t=int]} create a type from Lua
+	local V = arrayview(T,[cmp=],[size_t=int])  create a type from Lua
+	var v: arrayview{...}                       create a type from Terra
+	var v = arrayview{...}                      create a value from Terra
+	var v = arrayview(T[,cmp,...])              create a value from Terra
+	var v = arrayview(T,elements,len[,cmp,...]) create a value from Terra
+	var v = V(nil)                              nil-cast for use in constant()
+	var v = V{elements,len}                     field order is part of the API
+	var v = V{elements=,len=}                   fields are part of the API
+	var s = V(rawstring|'string constant')      cast from C string
+	v:onrawstring(rawstring) -> self            init with C string
+	v.elements, v.len                           fields are part of the API
 
-	v:range(i, j) -> start, len
-	v:view(i, j) -> v
+	v:validindex(i[,default]) -> i              valid positive index
+	v(i[,default]) -> t|default                 get element at index
+	v:at(i[,default]) -> &t|default             get element address at index
+	v:set(i,t)                                  set element at index
+	for i,&t in v[:backwards()] do ... end      iterate elements
 
-	v:at(i[,default]) -> &v|default
-	v(i[,default]) -> v|default
-	v:set(i, v)
-	for i,v in v[:backwards()] do ... end
+	v:range(i, j) -> start, len                 v:range(5, 5) -> 5, 0
+	v:sub(i, j) -> v                            create a sub-view
+	v:copy(&t) -> &t                            copy to buffer
+	v:copy(&v) -> &v                            copy to view
 
-	v:copy([v|&v]) -> v|&v
-	v:update(i, v|&v,len) -> ok?
+	v:__cmp(&v) -> -1,0,1                       comparison function
+	v:__eq(&v) -> true|false                    equality function
+	v:__hash32([d]) -> h                        32bit hash function
+	v:__hash64([d]) -> h                        64bit hash function
 
-	v:sort([cmp: {&T, &T} -> int32])
-	v:sort_desc()
-	v:find(v) -> i
-	v:count(v) -> n
-	v:binsearch(v, cmp: {&T, &T} -> bool) -> i
-	v:binsearch(v, a.lt|a.lte|a.gt|a.gte) -> i
-	v:binsearch_macro(v, cmp(t, i, v) -> bool) -> i
+	v1 <|<=|==|>=|>|~= v2                       compare views
 
-	v:reverse()
-	v:call(method, args...)
+	cmp = {&T, &T} -> int32                     type of element comparison function
+	v:sort([cmp])                               sort elements
+	v:sort_desc()                               sort descending
+	v:find(t[,default]) -> i|-1                 find element
+	v:count(t) -> n                             element occurences
+	v:binsearch(v, [cmp]) -> i                  binsearch (sort the view first!)
+	v:binsearch(v, v.lt|v.lte|v.gt|v.gte) -> i  binsearch with built-in cmp
 
-	v:indexof(&v[,default]) -> i|default
-	v:next([default]) -> &v|default
-	v:prev([default]) -> &v|default
+	v:reverse()                                 reverse order of elements
+	v:call(method, args...)                     call method on each element
+
+	v:indexat(&t[,default]) -> i|default        element index by address
+	v:next(&t, [default]) -> &t|default         next element
+	v:prev(&t, [default]) -> &t|default         previous element
 
 ]]
 
 if not ... then require'arrayview_test'; return end
 
+setfenv(1, require'low')
+
 local either = macro(function(v, a, b) return `v == a or v == b end)
 
-local function view_type(T, cmp, size_t, C)
-
-	setfenv(1, C)
+local function view_type(T, cmp, size_t)
 
 	local struct view {
 		elements: &T;
 		len: size_t; --number of valid elements
 	}
 
+	view.empty = `view{elements = nil, len = 0}
+
+	function view.metamethods.__cast(from, to, exp)
+		if from == niltype then --makes [arrview(T)](nil) work in a constant()
+			return view.empty
+		elseif T == int8 and from == rawstring then
+			return `view(nil):onrawstring(exp)
+		else
+			error'invalid cast'
+		end
+	end
+
 	--debugging
 
 	function view.metamethods.__typename(self)
 		return 'arrayview('..tostring(T)..')'
 	end
+	function view.metamethods.__typename_ffi(self)
+		return 'arrayview_'..tostring(T)
+	end
 
-	function view.metamethods.__tostring(self, format_arg, fmt, args, freelist)
-		add(fmt, '%s[%d]')
+	function view.metamethods.__tostring(self, format_arg, fmt, args, freelist, indent)
+		add(fmt, '%s[%d]<%llx>')
 		add(args, tostring(T))
 		add(args, `self.len)
+		add(args, `self.elements)
 	end
 
-	--storage
+	--default method
 
-	--initialize with a null-terminated string
-	terra view:fromcstring(s: &int8)
-		self.len = strnlen(s, [size_t:max()]-1)
-		self.elements = s
-		return self
-	end
-
-	--bounds-checked access
-
-	view.methods.at = overload('at', {})
-	view.methods.at:adddefinition(terra(self: &view, i: size_t): &T
-		if i < 0 then i = self.len + i end
-		assert(i >= 0 and i < self.len)
-		return &self.elements[i]
+	view.metamethods.__apply = macro(function(self, i, default)
+		if default then return `self:get(i, default) else return `self:get(i) end
 	end)
-	view.methods.at:adddefinition(terra(self: &view, i: size_t, default: &T): &T
-		if i < 0 then i = self.len + i end
-		return iif(i >= 0 and i < self.len, &self.elements[i], default)
-	end)
-
-	view.metamethods.__apply = overload('get', {})
-	view.metamethods.__apply:adddefinition(terra(self: &view, i: size_t): T
-		if i < 0 then i = self.len + i end
-		assert(i >= 0 and i < self.len)
-		return self.elements[i]
-	end)
-	view.metamethods.__apply:adddefinition(terra(self: &view, i: size_t, default: T): T
-		if i < 0 then i = self.len + i end
-		return iif(i >= 0 and i < self.len, self.elements[i], default)
-	end)
-
-	terra view:set(i: size_t, val: T)
-		if i < 0 then i = self.len + i end
-		assert(i >= 0 and i < self.len)
-		self.elements[i] = val
-	end
 
 	--iteration
 
@@ -115,329 +110,380 @@ local function view_type(T, cmp, size_t, C)
 		end
 	end
 
-	local struct reverse_iter { view: view; }
-	reverse_iter.metamethods.__for = function(self, body)
+	local struct backwards_iter { view: &view; }
+	backwards_iter.metamethods.__for = function(self, body)
 		return quote
 			for i = self.view.len-1, -1, -1 do
 				[ body(i, `&self.view.elements[i]) ]
 			end
 		end
 	end
-	terra view:backwards() return reverse_iter {@self} end
 
-	--sub-views
+	addmethods(view, function()
 
-	--NOTE: j is not the last position, but one position after that!
-	terra view:range(i: size_t, j: size_t)
-		if i < 0 then i = self.len + i end
-		if j < 0 then j = self.len + j end
-		assert(i >= 0)
-		j = min(max(i, j), self.len)
-		return i, j-i
-	end
+		--storage
 
-	view.methods.view = overload('view', {})
-	view.methods.view:adddefinition(terra(self: &view, i: size_t, j: size_t)
-		var start, len = self:range(i, j)
-		return view {elements = self.elements + start, len = len}
-	end)
-	view.methods.view:adddefinition(terra(self: &view, i: size_t)
-		return self:view(i, self.len)
-	end)
-
-	--copy out
-
-	view.methods.copy = overload('copy', {})
-	view.methods.copy:adddefinition(terra(self: &view, dst: &T)
-		memmove(dst, self.elements, self.len)
-		return dst
-	end)
-	view.methods.copy:adddefinition(terra(self: &view, dst: view)
-		memmove(dst.elements, self.elements, min(dst.len, self.len))
-		return dst
-	end)
-
-	--copy in
-
-	view.methods.update = overload('update', {})
-	view.methods.update:adddefinition(terra(self: &view, src: &T, len: size_t)
-		if len <= 0 then return end
-		memmove(&self.elements, src, sizeof(T) * min(len, self.len))
-	end)
-	view.methods.update:adddefinition(terra(self: &view, v: view)
-		return self:update(v.elements, v.len)
-	end)
-
-	--comparing views for inequality
-
-	--1. elements are comparable via cmp or __cmp metamethod.
-
-	--2. elements are comparable via metamethods.
-	local custom_op = not cmp and T:isaggregate()
-		and T.metamethods.__eq and T.metamethods.__lt
-
-	--3. elements are inherently comparable or comparable via metamethods.
-	if not cmp and (custom_op or T:isarithmetic() or T:ispointer()) then
-
-		cmp = terra(a: &T, b: &T): int32
-			return iif(@a == @b, 0, iif(@a < @b, -1, 1))
+		--initialize with a null-terminated string
+		if &T == rawstring then
+			terra view:onrawstring(s: rawstring)
+				self.len = strnlen(s, [size_t:max()]-1)
+				self.elements = s
+				return self
+			end
 		end
 
-		--4. uint8 views can even be mem-compared directly.
-		if not custom_op and T == uint8 then
+		--bounds-checked access
+
+		view.methods.validindex = overload'validindex'
+		view.methods.validindex:adddefinition(terra(self: &view, i: size_t, default: size_t)
+			if i < 0 then i = self.len + i end
+			return iif(i >= 0 and i < self.len, i, default)
+		end)
+		view.methods.validindex:adddefinition(terra(self: &view, i: size_t)
+			if i < 0 then i = self.len + i end
+			assert(i >= 0 and i < self.len)
+			return i
+		end)
+
+		view.methods.at = overload'at'
+		view.methods.at:adddefinition(terra(self: &view, i: size_t): &T
+			return &self.elements[self:validindex(i)]
+		end)
+		view.methods.at:adddefinition(terra(self: &view, i: size_t, default: &T): &T
+			i = self:validindex(i, -1)
+			return iif(i ~= -1, &self.elements[i], default)
+		end)
+
+		view.methods.get = overload'get'
+		view.methods.get:adddefinition(terra(self: &view, i: size_t): T
+			return self.elements[self:validindex(i)]
+		end)
+		view.methods.get:adddefinition(terra(self: &view, i: size_t, default: T): T
+			i = self:validindex(i, -1)
+			return iif(i ~= -1, self.elements[i], default)
+		end)
+
+		terra view:set(i: size_t, val: T)
+			self.elements[self:validindex(i)] = val
+		end
+
+		--iteration
+
+		terra view:backwards() return backwards_iter {self} end
+
+		--sub-views
+
+		--NOTE: j is not the last position, but one position after that.
+		--This is for compatibility with __for.
+		--NOTE: This makes 0 ambiguous with view.len.
+		terra view:range(i: size_t, j: size_t)
+			if i < 0 then i = self.len + i end
+			if j < 0 then j = self.len + j end
+			assert(i >= 0)
+			j = min(max(i, j), self.len)
+			return i, j-i
+		end
+
+		view.methods.sub = overload'sub'
+		view.methods.sub:adddefinition(terra(self: &view, i: size_t, j: size_t)
+			var start, len = self:range(i, j)
+			return view {elements = self.elements + start, len = len}
+		end)
+		view.methods.sub:adddefinition(terra(self: &view, i: size_t)
+			return self:sub(i, self.len)
+		end)
+
+		--copy out
+
+		view.methods.copy = overload'copy'
+		view.methods.copy:adddefinition(terra(self: &view, dst: &T)
+			copy(dst, self.elements, self.len)
+			return dst
+		end)
+		view.methods.copy:adddefinition(terra(self: &view, dst: &view)
+			copy(dst.elements, self.elements, min(dst.len, self.len))
+			return dst
+		end)
+
+		local user_cmp = cmp --keep the custom comparison function
+
+		--comparing views for inequality
+
+		--elements must be compared via comparison operators.
+		local use_op = not cmp and T:isaggregate()
+			and T.metamethods.__eq and T.metamethods.__lt
+
+		--elements must or can be compared via comparison operators.
+		if not cmp and (use_op or T:isarithmetic() or T:ispointer()) then
+
+			cmp = terra(a: &T, b: &T): int32 --for sorting this view
+				return iif(@a == @b, 0, iif(@a < @b, -1, 1))
+			end
+
+			--uint8 arrays can even be mem-compared directly.
+			if not custom_op and T == uint8 then
+				terra view:__cmp(v: &view) --for comparing views
+					if v.len ~= self.len then
+						return iif(self.len < v.len, -1, 1)
+					end
+					return memcmp(self.elements, v.elements, self.len)
+				end
+			end
+		end
+
+		--compare views by comparing elements individually.
+		if cmp and not view.methods.__cmp then
 			terra view:__cmp(v: &view)
 				if v.len ~= self.len then
 					return iif(self.len < v.len, -1, 1)
 				end
-				return memcmp(self.elements, v.elements, self.len)
+				for i,val in self do
+					var r = cmp(val, v:at(i))
+					if r ~= 0 then
+						return r
+					end
+				end
+				return 0
 			end
 		end
-	end
 
-	--compare views based on cmp.
-	if cmp and not view.metamethods.__cmp then
-		view.metamethods.__cmp = terra(self: &view, v: &view)
-			if v.len ~= self.len then
-				return iif(self.len < v.len, -1, 1)
+		--make all inequality comparison operators work too.
+		if view.methods.__cmp then
+			view.metamethods.__lt = terra(self: &view, v: &view) return self:__cmp(v) == -1 end
+			view.metamethods.__gt = terra(self: &view, v: &view) return self:__cmp(v) ==  1 end
+			view.metamethods.__le = terra(self: &view, v: &view) return either(self:__cmp(v), -1, 0) end
+			view.metamethods.__ge = terra(self: &view, v: &view) return either(self:__cmp(v),  1, 0) end
+		end
+
+		--comparing views for equality
+
+		if user_cmp then
+
+			--elements must be compared via custom comparison function.
+			terra view:__eq(v: &view)
+				return self:__cmp(v) == 0
 			end
-			for i, val in self do
-				var r = cmp(val, v:at(i))
-				if r ~= 0 then
-					return r
+
+		else
+
+			--elements must be compared via comparison operator.
+			local use_op = T:isaggregate() and T.metamethods.__eq
+
+			--elements must or can be compared via comparison operators.
+			--floats need this since they may not be normalized.
+			if not user_cmp and (use_op or T:isfloat()) then
+				terra view:__eq(v: &view)
+					if v.len ~= self.len then return false end
+					for i,val in self do
+						if @val ~= v.elements[i] then return false end
+					end
+					return true
+				end
+			else --use memcmp
+				terra view:__eq(v: &view)
+					if v.len ~= self.len then return false end
+					return equal(self.elements, v.elements, self.len)
 				end
 			end
-			return 0
+
 		end
-	end
 
-	local __cmp = view.metamethods.__cmp
-	if __cmp then
-		view.metamethods.__lt = terra(self: &view, v: &view) return __cmp(self, v) == -1 end
-		view.metamethods.__gt = terra(self: &view, v: &view) return __cmp(self, v) ==  1 end
-		view.metamethods.__le = terra(self: &view, v: &view) return either(__cmp(self, v), -1, 0) end
-		view.metamethods.__ge = terra(self: &view, v: &view) return either(__cmp(self, v),  1, 0) end
-		view.metamethods.__eq = terra(self: &view, v: &view) return __cmp(self, v) == 0 end
-	end
+		--make the == operator work too.
+		view.metamethods.__eq = view.methods.__eq
 
-	--comparing views for equality
+		--make the ~= operator work too.
+		if view.metamethods.__eq then
+			view.metamethods.__ne = macro(function(self, other)
+				return not (self == other)
+			end)
+		end
 
-	if not view.metamethods.__eq then
-		--floats might not be normalized, compare them individually.
-		if (T:isaggregate() and T.metamethods.__eq) or T:isfloat() then
-			view.metamethods.__eq = terra(self: &view, v: &view)
-				if v.len ~= self.len then return false end
-				for val in self do
-					if not (val == v.elements[i]) then return false end
+		--hashing using the default hash function
+
+		if hash then
+			view.methods.__hash32 = macro(function(self, d)
+				return `hash(uint32, self.elements, self.len * sizeof(T), [d or 0])
+			end)
+			view.methods.__hash64 = macro(function(self, d)
+				return `hash(uint64, self.elements, self.len * sizeof(T), [d or 0])
+			end)
+		end
+
+		--memsize for caches and debugging
+
+		terra view:__memsize(): size_t
+			return sizeof(view) + sizeof(T) * self.len
+		end
+
+		--sorting
+
+		view.methods.sort = overload'sort'
+		view.methods.sort:adddefinition(terra(self: &view, cmp: {&T, &T} -> int32)
+			qsort(self.elements, self.len, sizeof(T),
+				[{&opaque, &opaque} -> int32](cmp))
+			return self
+		end)
+
+		if cmp then
+			view.methods.sort:adddefinition(terra(self: &view)
+				return self:sort(cmp)
+			end)
+			local terra cmp_desc(a: &T, b: &T): int32
+				return -cmp(a, b)
+			end
+			terra view:sort_desc() return self:sort(cmp_desc) end
+		end
+
+		--searching
+
+		local eq = user_cmp and macro(function(a, b) return `user_cmp(a, b) == 0 end)
+		if not eq and T:isaggregate() and not T.metamethods.__eq then --use memcmp
+			eq = macro(function(a, b) return `memcmp(a, b, sizeof(T)) == 0 end)
+		end
+		eq = eq or macro(function(a, b) return `@a == @b end)
+
+		terra view:find(val: T, default: size_t)
+			for i, v in self do
+				if eq(v, &val) then
+					return i
 				end
-				return true
 			end
-		else --use memcmp for everything else
-			view.metamethods.__eq = terra(self: &view, v: &view)
-				if v.len ~= self.len then return false end
-				return memcmp(self.elements, v.elements, sizeof(T) * self.len) == 0
+			return default
+		end
+
+		terra view:count(val: T)
+			var n: size_t = 0
+			for i, v in self do
+				if eq(v, &val) then
+					n = n + 1
+				end
 			end
+			return n
 		end
-	end
 
-	local __eq = view.metamethods.__eq
-	if __eq then
-		view.metamethods.__ne = terra(self: &view, v: &view) return not __eq(self, v) end
-	end
+		--binary search for an insert position that keeps the array sorted.
 
-	--hashing using the default hash function
-
-	if hash then
-		view.methods.__hash32 = macro(function(self, d)
-			return `hash(uint32, self.elements, self.len * sizeof(T), [d or 0])
-		end)
-		view.methods.__hash64 = macro(function(self, d)
-			return `hash(uint64, self.elements, self.len * sizeof(T), [d or 0])
-		end)
-	end
-
-	--memsize for caches and debugging
-
-	terra view:__memsize(): size_t
-		return sizeof(view) + sizeof(T) * self.len
-	end
-
-	--sorting
-
-	view.methods.sort = overload('sort', {})
-	view.methods.sort:adddefinition(terra(self: &view, cmp: {&T, &T} -> int32)
-		qsort(self.elements, self.len, sizeof(T),
-			[{&opaque, &opaque} -> int32](cmp))
-		return self
-	end)
-
-	if cmp then
-		view.methods.sort:adddefinition(terra(self: &view)
-			return self:sort(cmp)
-		end)
-		local terra cmp_desc(a: &T, b: &T): int32
-			return -cmp(a, b)
+		local lt, gt, lte, gte
+		if cmp then
+			lt = terra(a: &T, b: &T) return cmp(a, b) == -1 end
+			gt = terra(a: &T, b: &T) return cmp(a, b) ==  1 end
+			le = terra(a: &T, b: &T) return either(cmp(a, b), -1, 0) end
+			ge = terra(a: &T, b: &T) return either(cmp(a, b),  1, 0) end
+		elseif not T:isaggregate() then
+			lt = terra(a: &T, b: &T) return @a <  @b end
+			gt = terra(a: &T, b: &T) return @a >  @b end
+			le = terra(a: &T, b: &T) return @a <= @b end
+			ge = terra(a: &T, b: &T) return @a >= @b end
 		end
-		terra view:sort_desc() return self:sort(cmp_desc) end
-	end
-
-	--searching
-
-	local eq = cmp and macro(function(a, b) return `cmp(a, b) == 0 end)
-	if not eq and T:isaggregate() and not T.metamethods.__eq then --use memcmp
-		eq = macro(function(a, b) return `memcmp(a, b, sizeof(T)) == 0 end)
-	end
-	eq = eq or macro(function(a, b) return `@a == @b end)
-
-	terra view:find(val: T)
-		for i, v in self do
-			if eq(v, &val) then
-				return i
-			end
+		--expose comparators as virtual fields of the view.
+		if lt then
+			addproperties(view)
+			view.properties.lt = lt
+			view.properties.gt = gt
+			view.properties.le = le
+			view.properties.ge = ge
 		end
-		return -1
-	end
 
-	terra view:count(val: T)
-		var n: size_t = 0
-		for i, v in self do
-			if eq(v, &val) then
-				n = n + 1
-			end
-		end
-		return n
-	end
-
-	--binary search for an insert position that keeps the array sorted.
-
-	local lt, gt, lte, gte
-	if cmp then
-		lt = terra(a: &T, b: &T) return cmp(a, b) == -1 end
-		gt = terra(a: &T, b: &T) return cmp(a, b) ==  1 end
-		le = terra(a: &T, b: &T) return either(cmp(a, b), -1, 0) end
-		ge = terra(a: &T, b: &T) return either(cmp(a, b),  1, 0) end
-	elseif not T:isaggregate() then
-		lt = terra(a: &T, b: &T) return @a <  @b end
-		gt = terra(a: &T, b: &T) return @a >  @b end
-		le = terra(a: &T, b: &T) return @a <= @b end
-		ge = terra(a: &T, b: &T) return @a >= @b end
-	end
-	--expose comparators as virtual fields of the view.
-	if lt then
-		addproperties(view)
-		view.properties.lt = macro(function() return lt  end)
-		view.properties.gt = macro(function() return gt  end)
-		view.properties.le = macro(function() return le end)
-		view.properties.ge = macro(function() return ge end)
-	end
-
-	view.methods.binsearch = overload('binsearch', {})
-	view.methods.binsearch:adddefinition(
-	terra(self: &view, v: T, cmp: {&T, &T} -> bool): size_t
-		var lo = [size_t](0)
-		var hi = self.len-1
-		var i = hi + 1
-		while true do
-			if lo < hi then
-				var mid: int = lo + (hi - lo) / 2
-				if cmp(&self.elements[mid], &v) then
-					lo = mid + 1
+		view.methods.binsearch = overload'binsearch'
+		view.methods.binsearch:adddefinition(
+		terra(self: &view, v: T, cmp: {&T, &T} -> bool): size_t
+			var lo = [size_t](0)
+			var hi = self.len-1
+			var i = hi + 1
+			while true do
+				if lo < hi then
+					var mid: int = lo + (hi - lo) / 2
+					if cmp(&self.elements[mid], &v) then
+						lo = mid + 1
+					else
+						hi = mid
+					end
+				elseif lo == hi and not cmp(&self.elements[lo], &v) then
+					return lo
 				else
-					hi = mid
+					return i
 				end
-			elseif lo == hi and not cmp(&self.elements[lo], &v) then
-				return lo
-			else
-				return i
 			end
-		end
-	end)
-	if lt then
-		view.methods.binsearch:adddefinition(terra(self: &view, v: T): size_t
-			return self:binsearch(v, lt)
 		end)
-	end
-
-	local cmp_lt = macro(function(t, i, v) return `t[i] < v end)
-	view.methods.binsearch_macro = macro(function(self, v, cmp)
-		cmp = cmp or cmp_lt
-		return `binsearch(v, self.elements, 0, self.len-1, cmp)
-	end)
-
-	--reversing the order of elements
-
-	terra view:reverse()
-		var j = self.len-1
-		for k = 0, (j+1)/2 do
-			var tmp = self.elements[k]
-			self.elements[k] = self.elements[j-k]
-			self.elements[j-k] = tmp
+		if lt then
+			view.methods.binsearch:adddefinition(terra(self: &view, v: T): size_t
+				return self:binsearch(v, lt)
+			end)
 		end
-		return self
-	end
 
-	--calling methods on the elements
+		--reversing the order of elements
 
-	view.methods.call = macro(function(self, method_name, ...)
-		local method = T.methods[method_name:asvalue()]
-		local args = {...}
-		return quote
-			for i,v in self do
-				method(v, [args])
+		terra view:reverse()
+			var j = self.len-1
+			for k = 0, (j+1)/2 do
+				var tmp = self.elements[k]
+				self.elements[k] = self.elements[j-k]
+				self.elements[j-k] = tmp
 			end
+			return self
 		end
-	end)
 
-	--pointer interface
+		--calling methods on the elements
 
-	view.methods.indexof = overload('indexof', {})
-	view.methods.indexof:adddefinition(terra(self: &view, pv: &T, default: size_t)
-		var i = pv - self.elements
-		return iif(i >= 0 and i < self.len, i, default)
-	end)
-	view.methods.indexof:adddefinition(terra(self: &view, pv: &T)
-		var i = pv - self.elements
-		assert(i >= 0 and i < self.len)
-		return i
-	end)
+		view.methods.call = macro(function(self, method_name, ...)
+			local method = T:getmethod(method_name:asvalue())
+			local args = {...}
+			return quote
+				for i,v in self do
+					method(v, [args])
+				end
+			end
+		end)
 
-	view.methods.next = overload('next', {})
-	view.methods.next:adddefinition(terra(self: &view, pv: &T, default: &T)
-		var i = pv - self.elements
-		return iif(i >= 0 and i < self.len-1, self.elements + i + 1, default)
-	end)
-	view.methods.next:adddefinition(terra(self: &view, pv: &T)
-		var i = pv - self.elements
-		assert(i >= 0 and i < self.len-1)
-		return self.elements + i + 1
-	end)
+		--pointer interface
 
-	view.methods.prev = overload('prev', {})
-	view.methods.prev:adddefinition(terra(self: &view, pv: &T, default: &T)
-		var i = pv - self.elements
-		return iif(i > 0 and i < self.len, self.elements + i - 1, default)
-	end)
-	view.methods.prev:adddefinition(terra(self: &view, pv: &T)
-		var i = pv - self.elements
-		assert(i > 0 and i < self.len)
-		return self.elements + i - 1
-	end)
+		view.methods.indexat = overload'indexat'
+		view.methods.indexat:adddefinition(terra(self: &view, pv: &T, default: size_t)
+			return self:validindex(pv - self.elements, default)
+		end)
+		view.methods.indexat:adddefinition(terra(self: &view, pv: &T)
+			return self:validindex(pv - self.elements)
+		end)
+
+		view.methods.next = overload'next'
+		view.methods.next:adddefinition(terra(self: &view, pv: &T, default: &T)
+			var i = pv - self.elements
+			return iif(i >= 0 and i < self.len-1, self.elements + i + 1, default)
+		end)
+		view.methods.next:adddefinition(terra(self: &view, pv: &T)
+			var i = pv - self.elements
+			assert(i >= 0 and i < self.len-1)
+			return self.elements + i + 1
+		end)
+
+		view.methods.prev = overload'prev'
+		view.methods.prev:adddefinition(terra(self: &view, pv: &T, default: &T)
+			var i = pv - self.elements
+			return iif(i > 0 and i < self.len, self.elements + i - 1, default)
+		end)
+		view.methods.prev:adddefinition(terra(self: &view, pv: &T)
+			var i = pv - self.elements
+			assert(i > 0 and i < self.len)
+			return self.elements + i - 1
+		end)
+
+	end) --addmethods
 
 	return view
 end
-view_type = terralib.memoize(view_type)
+view_type = memoize(view_type)
 
-local view_type = function(T, cmp, size_t, C)
+local view_type = function(T, cmp, size_t)
 	if terralib.type(T) == 'table' then
-		T, cmp, size_t, C = T.T, T.cmp, T.size_t, T.C
+		T, cmp, size_t = T.T, T.cmp, T.size_t
 	end
 	assert(T)
-	cmp = cmp or (T:isaggregate() and T.metamethods.__cmp)
-	size_t = size_t or int32
-	C = C or require'low'
-	return view_type(T, cmp, size_t, C)
+	cmp = cmp or (T:isaggregate() and (T.metamethods.__cmp or T:getmethod'__cmp'))
+	size_t = size_t or int
+	return view_type(T, cmp, size_t)
 end
 
-local view = macro(
+arrview = macro(
 	--calling it from Terra returns a new view.
 	function(arg1, ...)
 		local T, lval, len, cmp, size_t
@@ -462,5 +508,3 @@ local view = macro(
 	--just the type, and you can also pass a custom C namespace.
 	view_type
 )
-
-return view

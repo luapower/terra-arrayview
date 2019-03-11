@@ -1,11 +1,12 @@
 
 setfenv(1, require'low')
-local view = require'arrayview'
 
+local s = 'Hello World!\0'
 terra test()
-	var s = 'Hello World!'
-	var v: view(int8)
-	v:fromcstring(s)
+	var buf = new(int8, [#s])
+	copy(buf, s, [#s])
+	var v: arrview(int8)
+	v:onrawstring(buf)
 	print(v.len)
 	print(v:at(11))
 	print(v:at(12, nil))
@@ -15,7 +16,9 @@ terra test()
 		fprintf(stdout(), '%d ', @v)
 	end
 	print()
-	var v2 = v:view(0, v.len)
+	var v2 = v:sub(0, v.len)
+	v:sort()
+	v:reverse()
 	for i,v in v2:backwards() do
 		fprintf(stdout(), '%d ', @v)
 	end
