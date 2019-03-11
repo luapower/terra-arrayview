@@ -6,50 +6,50 @@
 	An array view maps the idea of an array onto any memory location.
 
 	local V = arrayview{T=,[cmp=],[size_t=int]} create a type from Lua
-	local V = arrayview(T,[cmp=],[size_t=int])  create a type from Lua
-	var v: arrayview{...}                       create a type from Terra
-	var v = arrayview{...}                      create a value from Terra
-	var v = arrayview(T[,cmp,...])              create a value from Terra
-	var v = arrayview(T,elements,len[,cmp,...]) create a value from Terra
+	local V = arrayview(T, [cmp=],[size_t=int]) create a type from Lua
+	var v =   arrayview{T=,[cmp=],[size_t=int]} create a value from Terra
+	var v =   arrayview(T, [cmp=],[size_t=int]) create a value from Terra
+	var v =   arrayview(T, elements,len[ ,...]) create a value from Terra
 	var v = V(nil)                              nil-cast for use in constant()
 	var v = V{elements,len}                     field order is part of the API
 	var v = V{elements=,len=}                   fields are part of the API
+
 	var s = V(rawstring|'string constant')      cast from C string
-	v:onrawstring(rawstring) -> self            init with C string
+	v:onrawstring(rawstring) -> v               init with C string
 	v.elements, v.len                           fields are part of the API
 
-	v:validindex(i[,default]) -> i              valid positive index
-	v(i[,default]) -> t|default                 get element at index
-	v:at(i[,default]) -> &t|default             get element address at index
-	v:set(i,t)                                  set element at index
-	for i,&t in v[:backwards()] do ... end      iterate elements
+	v:index(i[,default]) -> i|default           valid positive index
+	v(i[,default]) -> T|default                 get element at index
+	v:at(i[,default]) -> &T|default             get element address at index
+	v:set(i,T)                                  set element at index
+	for i,&T in v[:backwards()] do ... end      iterate elements
 
-	v:range(i, j) -> start, len                 v:range(5, 5) -> 5, 0
-	v:sub(i, j) -> v                            create a sub-view
-	v:copy(&t) -> &t                            copy to buffer
+	v:range(i,j) -> start,len                   v:range(5, 5) -> 5, 0
+	v:sub(i,j) -> v                             create a sub-view
+	v:copy(&T) -> &T                            copy to buffer
 	v:copy(&v) -> &v                            copy to view
 
 	v:__cmp(&v) -> -1,0,1                       comparison function
-	v:__eq(&v) -> true|false                    equality function
-	v:__hash32([d]) -> h                        32bit hash function
-	v:__hash64([d]) -> h                        64bit hash function
+	v:__eq(&v) -> equal?                        equality function
+	v:__hash32([h0=0]) -> h                     32bit hash function
+	v:__hash64([h0=0]) -> h                     64bit hash function
 
 	v1 <|<=|==|>=|>|~= v2                       compare views
 
 	cmp = {&T, &T} -> int32                     type of element comparison function
 	v:sort([cmp])                               sort elements
 	v:sort_desc()                               sort descending
-	v:find(t[,default]) -> i|-1                 find element
-	v:count(t) -> n                             element occurences
-	v:binsearch(v, [cmp]) -> i                  binsearch (sort the view first!)
-	v:binsearch(v, v.lt|v.lte|v.gt|v.gte) -> i  binsearch with built-in cmp
+	v:find(T[,default]) -> i|-1                 find element
+	v:count(T) -> n                             element occurences
+	v:binsearch(T, [cmp]) -> i                  binsearch (sort the view first!)
+	v:binsearch(T, v.lt|v.lte|v.gt|v.gte) -> i  binsearch with built-in cmp
 
 	v:reverse()                                 reverse order of elements
 	v:call(method, args...)                     call method on each element
 
-	v:indexat(&t[,default]) -> i|default        element index by address
-	v:next(&t, [default]) -> &t|default         next element
-	v:prev(&t, [default]) -> &t|default         previous element
+	v:index(&T[,default]) -> i|default          element index by address
+	v:next(&T,[default]) -> &T|default          next element
+	v:prev(&T,[default]) -> &T|default          previous element
 
 ]]
 
@@ -82,9 +82,6 @@ local function view_type(T, cmp, size_t)
 
 	function view.metamethods.__typename(self)
 		return 'arrayview('..tostring(T)..')'
-	end
-	function view.metamethods.__typename_ffi(self)
-		return 'arrayview_'..tostring(T)
 	end
 
 	function view.metamethods.__tostring(self, format_arg, fmt, args, freelist, indent)
@@ -134,12 +131,12 @@ local function view_type(T, cmp, size_t)
 
 		--bounds-checked access
 
-		view.methods.validindex = overload'validindex'
-		view.methods.validindex:adddefinition(terra(self: &view, i: size_t, default: size_t)
+		view.methods.index = overload'index'
+		view.methods.index:adddefinition(terra(self: &view, i: size_t, default: size_t)
 			if i < 0 then i = self.len + i end
 			return iif(i >= 0 and i < self.len, i, default)
 		end)
-		view.methods.validindex:adddefinition(terra(self: &view, i: size_t)
+		view.methods.index:adddefinition(terra(self: &view, i: size_t)
 			if i < 0 then i = self.len + i end
 			assert(i >= 0 and i < self.len)
 			return i
@@ -147,24 +144,24 @@ local function view_type(T, cmp, size_t)
 
 		view.methods.at = overload'at'
 		view.methods.at:adddefinition(terra(self: &view, i: size_t): &T
-			return &self.elements[self:validindex(i)]
+			return &self.elements[self:index(i)]
 		end)
 		view.methods.at:adddefinition(terra(self: &view, i: size_t, default: &T): &T
-			i = self:validindex(i, -1)
+			i = self:index(i, -1)
 			return iif(i ~= -1, &self.elements[i], default)
 		end)
 
 		view.methods.get = overload'get'
 		view.methods.get:adddefinition(terra(self: &view, i: size_t): T
-			return self.elements[self:validindex(i)]
+			return self.elements[self:index(i)]
 		end)
 		view.methods.get:adddefinition(terra(self: &view, i: size_t, default: T): T
-			i = self:validindex(i, -1)
+			i = self:index(i, -1)
 			return iif(i ~= -1, self.elements[i], default)
 		end)
 
 		terra view:set(i: size_t, val: T)
-			self.elements[self:validindex(i)] = val
+			self.elements[self:index(i)] = val
 		end
 
 		--iteration
@@ -437,12 +434,11 @@ local function view_type(T, cmp, size_t)
 
 		--pointer interface
 
-		view.methods.indexat = overload'indexat'
-		view.methods.indexat:adddefinition(terra(self: &view, pv: &T, default: size_t)
-			return self:validindex(pv - self.elements, default)
+		view.methods.index:adddefinition(terra(self: &view, pv: &T, default: size_t)
+			return self:index(pv - self.elements, default)
 		end)
-		view.methods.indexat:adddefinition(terra(self: &view, pv: &T)
-			return self:validindex(pv - self.elements)
+		view.methods.index:adddefinition(terra(self: &view, pv: &T)
+			return self:index(pv - self.elements)
 		end)
 
 		view.methods.next = overload'next'
