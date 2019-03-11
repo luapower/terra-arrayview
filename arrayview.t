@@ -479,7 +479,7 @@ local view_type = function(T, cmp, size_t)
 	return view_type(T, cmp, size_t)
 end
 
-arrview = macro(
+return macro(
 	--calling it from Terra returns a new view.
 	function(arg1, ...)
 		local T, lval, len, cmp, size_t
