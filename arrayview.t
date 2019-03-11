@@ -3,7 +3,7 @@
 	Array view type for Terra.
 	Written by Cosmin Apreutesei. Public domain.
 
-	An array view maps the idea of an array onto any memory location.
+	An array view maps the idea of a finite array onto a memory location.
 
 	local V = arrayview{T=,[cmp=],[size_t=int]} create a type from Lua
 	local V = arrayview(T, [cmp=],[size_t=int]) create a type from Lua
@@ -19,14 +19,14 @@
 	v.elements, v.len                           fields are part of the API
 
 	v:index(i[,default]) -> i|default           valid positive index
-	v(i[,default]) -> T|default                 get element at index
-	v:at(i[,default]) -> &T|default             get element address at index
-	v:set(i,T)                                  set element at index
-	for i,&T in v[:backwards()] do ... end      iterate elements
+	v(i[,default]) -> t|default                 get element at index
+	v:at(i[,default]) -> &t|default             get element address at index
+	v:set(i,t)                                  set element at index
+	for i,&t in v[:backwards()] do ... end      iterate elements
 
 	v:range(i,j) -> start,len                   v:range(5, 5) -> 5, 0
 	v:sub(i,j) -> v                             create a sub-view
-	v:copy(&T) -> &T                            copy to buffer
+	v:copy(&t) -> &t                            copy to buffer
 	v:copy(&v) -> &v                            copy to view
 
 	v:__cmp(&v) -> -1,0,1                       comparison function
@@ -39,17 +39,17 @@
 	cmp = {&T, &T} -> int32                     type of element comparison function
 	v:sort([cmp])                               sort elements
 	v:sort_desc()                               sort descending
-	v:find(T[,default]) -> i|-1                 find element
-	v:count(T) -> n                             element occurences
-	v:binsearch(T, [cmp]) -> i                  binsearch (sort the view first!)
-	v:binsearch(T, v.lt|v.lte|v.gt|v.gte) -> i  binsearch with built-in cmp
+	v:find(t[,default]) -> i|-1                 find element
+	v:count(t) -> n                             element occurences
+	v:binsearch(t, [cmp]) -> i                  binsearch (sort the view first!)
+	v:binsearch(t, v.lt|v.lte|v.gt|v.gte) -> i  binsearch with built-in cmp
 
 	v:reverse()                                 reverse order of elements
 	v:call(method, args...)                     call method on each element
 
-	v:index(&T[,default]) -> i|default          element index by address
-	v:next(&T,[default]) -> &T|default          next element
-	v:prev(&T,[default]) -> &T|default          previous element
+	v:index(&t[,default]) -> i|default          element index by address
+	v:next(&t,[default]) -> &t|default          next element
+	v:prev(&t,[default]) -> &t|default          previous element
 
 ]]
 
@@ -69,13 +69,14 @@ local function view_type(T, cmp, size_t)
 	view.empty = `view{elements = nil, len = 0}
 
 	function view.metamethods.__cast(from, to, exp)
-		if from == niltype then --makes [arrview(T)](nil) work in a constant()
-			return view.empty
-		elseif T == int8 and from == rawstring then
-			return `view(nil):onrawstring(exp)
-		else
-			error'invalid cast'
+		if to == view then
+			if from == niltype then --makes [arrview(T)](nil) work in a constant()
+				return view.empty
+			elseif T == int8 and from == rawstring then
+				return `view(nil):onrawstring(exp)
+			end
 		end
+		assert(false, 'invalid cast from ', from, ' to ', to, ': ', exp)
 	end
 
 	--debugging
