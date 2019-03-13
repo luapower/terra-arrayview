@@ -15,7 +15,7 @@
 	var v = V{elements=,len=}                   fields are part of the API
 
 	var s = V(rawstring|'string constant')      cast from C string
-	v:onrawstring(rawstring) -> v               init with C string
+	v:onrawstring(rawstring) -> &v              init with C string
 	v.elements, v.len                           fields are part of the API
 
 	v:index(i[,default]) -> i|default           valid positive index
@@ -70,10 +70,10 @@ local function view_type(T, cmp, size_t)
 
 	function view.metamethods.__cast(from, to, exp)
 		if to == view then
-			if from == niltype then --makes [arrview(T)](nil) work in a constant()
+			if from == niltype then
 				return view.empty
 			elseif T == int8 and from == rawstring then
-				return `view(nil):onrawstring(exp)
+				return quote var v = view(nil); v:onrawstring(exp) in v end
 			end
 		end
 		assert(false, 'invalid cast from ', from, ' to ', to, ': ', exp)
