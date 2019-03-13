@@ -10,7 +10,7 @@
 	var v =   arrayview{T=,[cmp=],[size_t=int]} create a value from Terra
 	var v =   arrayview(T, [cmp=],[size_t=int]) create a value from Terra
 	var v =   arrayview(T, elements,len[ ,...]) create a value from Terra
-	var v = V(nil)                              nil-cast for use in constant()
+	var v = V(nil)                              nil-cast (for use in constant())
 	var v = V{elements,len}                     field order is part of the API
 	var v = V{elements=,len=}                   fields are part of the API
 
@@ -31,8 +31,8 @@
 
 	v:__cmp(&v) -> -1,0,1                       comparison function
 	v:__eq(&v) -> equal?                        equality function
-	v:__hash32([h0=0]) -> h                     32bit hash function
-	v:__hash64([h0=0]) -> h                     64bit hash function
+	v:__hash32(seed) -> h                       32bit hash function
+	v:__hash64(seed) -> h                       64bit hash function
 
 	v1 <|<=|==|>=|>|~= v2                       compare views
 
@@ -298,13 +298,11 @@ local function view_type(T, cmp, size_t)
 
 		--hashing using the default hash function
 
-		if hash then
-			view.methods.__hash32 = macro(function(self, d)
-				return `hash(uint32, self.elements, self.len * sizeof(T), [d or 0])
-			end)
-			view.methods.__hash64 = macro(function(self, d)
-				return `hash(uint64, self.elements, self.len * sizeof(T), [d or 0])
-			end)
+		terra view:__hash32(seed: uint32)
+			return hash(uint32, self.elements, seed, self.len)
+		end
+		terra view:__hash64(seed: uint64)
+			return hash(uint64, self.elements, seed, self.len)
 		end
 
 		--memsize for caches and debugging
