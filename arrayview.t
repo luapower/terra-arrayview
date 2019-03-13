@@ -203,23 +203,22 @@ local function view_type(T, cmp, size_t)
 			return dst
 		end)
 
-		local user_cmp = cmp --keep the custom comparison function
-
 		--comparing views for inequality
 
-		--elements must be compared via comparison operators.
-		local use_op = not cmp and T:isaggregate()
-			and T.metamethods.__eq and T.metamethods.__lt
+		local user_cmp = cmp
+		if not user_cmp then
+			--elements must be compared via comparison operators.
+			local use_op = T.metamethods and T.metamethods.__eq and T.metamethods.__lt
 
-		--elements must or can be compared via comparison operators.
-		if not cmp and (use_op or T:isarithmetic() or T:ispointer()) then
-
-			cmp = terra(a: &T, b: &T): int32 --for sorting this view
-				return iif(@a == @b, 0, iif(@a < @b, -1, 1))
+			--elements must be compared via comparison operators.
+			if use_op or T:isarithmetic() or T:ispointer() then
+				cmp = terra(a: &T, b: &T): int32 --for sorting this view
+					return iif(@a == @b, 0, iif(@a < @b, -1, 1))
+				end
 			end
 
-			--uint8 arrays can even be mem-compared directly.
-			if not custom_op and T == uint8 then
+			--uint8 arrays can be mem-compared directly.
+			if not use_op and T == uint8 then
 				terra view:__cmp(v: &view) --for comparing views
 					if v.len ~= self.len then
 						return iif(self.len < v.len, -1, 1)
@@ -256,40 +255,20 @@ local function view_type(T, cmp, size_t)
 		--comparing views for equality
 
 		if user_cmp then
-
-			--elements must be compared via custom comparison function.
+			--elements must be compared via user-supplied comparison function.
 			terra view:__eq(v: &view)
 				return self:__cmp(v) == 0
 			end
-
 		else
-
-			--elements must be compared via comparison operator.
-			local use_op = T:isaggregate() and T.metamethods.__eq
-
-			--elements must or can be compared via comparison operators.
-			--floats need this since they may not be normalized.
-			if not user_cmp and (use_op or T:isfloat()) then
-				terra view:__eq(v: &view)
-					if v.len ~= self.len then return false end
-					for i,val in self do
-						if @val ~= v.elements[i] then return false end
-					end
-					return true
-				end
-			else --use memcmp
-				terra view:__eq(v: &view)
-					if v.len ~= self.len then return false end
-					return equal(self.elements, v.elements, self.len)
-				end
+			--elements can be compared via `==`, own __eq method or memcmp.
+			terra view:__eq(v: &view)
+				if v.len ~= self.len then return false end
+				return equal(self.elements, v.elements, self.len)
 			end
-
 		end
 
-		--make the == operator work too.
+		--make `==` and `~=` operators work too.
 		view.metamethods.__eq = view.methods.__eq
-
-		--make the ~= operator work too.
 		if view.metamethods.__eq then
 			view.metamethods.__ne = macro(function(self, other)
 				return not (self == other)
@@ -333,7 +312,7 @@ local function view_type(T, cmp, size_t)
 		--searching
 
 		local eq = user_cmp and macro(function(a, b) return `user_cmp(a, b) == 0 end)
-		if not eq and T:isaggregate() and not T.metamethods.__eq then --use memcmp
+		if not eq and T.metamethods and not T.metamethods.__eq then --use memcmp
 			eq = macro(function(a, b) return `memcmp(a, b, sizeof(T)) == 0 end)
 		end
 		eq = eq or macro(function(a, b) return `@a == @b end)
@@ -365,7 +344,7 @@ local function view_type(T, cmp, size_t)
 			gt = terra(a: &T, b: &T) return cmp(a, b) ==  1 end
 			le = terra(a: &T, b: &T) return either(cmp(a, b), -1, 0) end
 			ge = terra(a: &T, b: &T) return either(cmp(a, b),  1, 0) end
-		elseif not T:isaggregate() then
+		elseif not T:isaggregate() then --TODO: fix this
 			lt = terra(a: &T, b: &T) return @a <  @b end
 			gt = terra(a: &T, b: &T) return @a >  @b end
 			le = terra(a: &T, b: &T) return @a <= @b end
@@ -473,7 +452,7 @@ local view_type = function(T, cmp, size_t)
 		T, cmp, size_t = T.T, T.cmp, T.size_t
 	end
 	assert(T)
-	cmp = cmp or (T:isaggregate() and (T.metamethods.__cmp or T:getmethod'__cmp'))
+	cmp = cmp or (T.getmethod and T:getmethod'__cmp')
 	size_t = size_t or int
 	return view_type(T, cmp, size_t)
 end
