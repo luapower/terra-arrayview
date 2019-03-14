@@ -391,9 +391,7 @@ local function view_type(T, cmp, size_t)
 		terra view:reverse()
 			var j = self.len-1
 			for k = 0, (j+1)/2 do
-				var tmp = self.elements[k]
-				self.elements[k] = self.elements[j-k]
-				self.elements[j-k] = tmp
+				swap(self.elements[k], self.elements[j-k])
 			end
 			return self
 		end
