@@ -313,7 +313,7 @@ local function view_type(T, cmp, size_t)
 		eq = eq or macro(function(a, b) return `@a == @b end)
 
 		terra view:find(val: T, default: size_t)
-			for i, v in self do
+			for i,v in self do
 				if eq(v, &val) then
 					return i
 				end
