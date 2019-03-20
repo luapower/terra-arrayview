@@ -134,11 +134,9 @@ local function view_type(T, cmp, size_t)
 
 		view.methods.index = overload'index'
 		view.methods.index:adddefinition(terra(self: &view, i: size_t, default: size_t)
-			if i < 0 then i = self.len + i end
 			return iif(i >= 0 and i < self.len, i, default)
 		end)
 		view.methods.index:adddefinition(terra(self: &view, i: size_t)
-			if i < 0 then i = self.len + i end
 			assert(i >= 0 and i < self.len)
 			return i
 		end)
@@ -172,11 +170,8 @@ local function view_type(T, cmp, size_t)
 		--sub-views
 
 		--NOTE: j is not the last position, but one position after that.
-		--This is for compatibility with __for.
-		--NOTE: This makes 0 ambiguous with view.len.
+		--NOTE: if j < i, j is adjusted, not i.
 		terra view:range(i: size_t, j: size_t)
-			if i < 0 then i = self.len + i end
-			if j < 0 then j = self.len + j end
 			assert(i >= 0)
 			j = min(max(i, j), self.len)
 			return i, j-i
@@ -286,7 +281,7 @@ local function view_type(T, cmp, size_t)
 
 		--memsize for caches and debugging
 
-		terra view:__memsize(): size_t
+		terra view:__memsize()
 			return sizeof(view) + sizeof(T) * self.len
 		end
 
@@ -398,14 +393,9 @@ local function view_type(T, cmp, size_t)
 
 		--calling methods on the elements
 
-		view.methods.call = macro(function(self, method_name, ...)
-			local method = T:getmethod(method_name:asvalue())
+		view.methods.call = macro(function(self, method, ...)
 			local args = {...}
-			return quote
-				for i,v in self do
-					method(v, [args])
-				end
-			end
+			return `call(self.elements, method, self.len, args)
 		end)
 
 		--pointer interface
@@ -438,6 +428,8 @@ local function view_type(T, cmp, size_t)
 			assert(i > 0 and i < self.len)
 			return self.elements + i - 1
 		end)
+
+		setinlined(view.methods)
 
 	end) --addmethods
 
