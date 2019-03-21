@@ -10,7 +10,7 @@
 	var v =   arrayview{T=,[cmp=],[size_t=int]} create a value from Terra
 	var v =   arrayview(T, [cmp=],[size_t=int]) create a value from Terra
 	var v =   arrayview(T, elements,len[ ,...]) create a value from Terra
-	var v = V(nil)                              nil-cast (for use in constant())
+	var v = V(nil)                              nil-cast (for use in global())
 	var v = V{elements,len}                     field order is part of the API
 	var v = V{elements=,len=}                   fields are part of the API
 
@@ -66,6 +66,7 @@ local function view_type(T, cmp, size_t)
 		len: size_t; --number of valid elements
 	}
 
+	view.T = T
 	view.empty = `view{elements = nil, len = 0}
 
 	function view.metamethods.__cast(from, to, exp)
