@@ -3,7 +3,7 @@ setfenv(1, require'low')
 
 local s = 'Hello World!\0'
 terra test()
-	var buf = new(int8, [#s])
+	var buf = alloc(int8, [#s])
 	copy(buf, s, [#s])
 	var v: arrview(int8)
 	v:onrawstring(buf)

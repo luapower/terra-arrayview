@@ -5,10 +5,10 @@
 
 	An array view maps the idea of a finite array onto a memory location.
 
-	local V = arrayview{T=,[cmp=],[size_t=int]} create a type from Lua
-	local V = arrayview(T, [cmp=],[size_t=int]) create a type from Lua
-	var v =   arrayview{T=,[cmp=],[size_t=int]} create a value from Terra
-	var v =   arrayview(T, [cmp=],[size_t=int]) create a value from Terra
+	local V = arrayview{T=,[size_t=int],[cmp=]} create a type from Lua
+	local V = arrayview(T, [size_t=int],[cmp])  create a type from Lua
+	var v =   arrayview{T=,[size_t=int],[cmp=]} create a value from Terra
+	var v =   arrayview(T, [size_t=int],[cmp])  create a value from Terra
 	var v =   arrayview(T, elements,len[ ,...]) create a value from Terra
 	var v = V(nil)                              nil-cast (for use in global())
 	var v = V{elements,len}                     field order is part of the API
@@ -59,7 +59,7 @@ setfenv(1, require'low')
 
 local either = macro(function(v, a, b) return `v == a or v == b end)
 
-local function view_type(T, cmp, size_t)
+local function view_type(T, size_t, cmp)
 
 	local struct view {
 		elements: &T;
@@ -438,31 +438,31 @@ local function view_type(T, cmp, size_t)
 end
 view_type = memoize(view_type)
 
-local view_type = function(T, cmp, size_t)
+local view_type = function(T, size_t, cmp)
 	if terralib.type(T) == 'table' then
-		T, cmp, size_t = T.T, T.cmp, T.size_t
+		T, size_t, cmp = T.T, T.size_t, T.cmp
 	end
 	assert(T)
-	cmp = cmp or (T.getmethod and T:getmethod'__cmp')
 	size_t = size_t or int
-	return view_type(T, cmp, size_t)
+	cmp = cmp or (T.getmethod and T:getmethod'__cmp')
+	return view_type(T, size_t, cmp)
 end
 
-return macro(
+low.arrview = macro(
 	--calling it from Terra returns a new view.
 	function(arg1, ...)
-		local T, lval, len, cmp, size_t
+		local T, lval, len, size_t, cmp
 		if arg1 and arg1:islvalue() then --wrap raw pointer: arrayview(&t, len, ...)
-			lval, len, cmp, size_t = arg1, ...
+			lval, len, size_t, cmp = arg1, ...
 			T = lval:gettype()
 			assert(T:ispointer())
 			T = T.type
 		else --create new view: arrayview(T, ...)
-			T, cmp, size_t = arg1, ...
+			T, size_t, cmp = arg1, ...
 			T = T and T:astype()
 		end
 		size_t = size_t and size_t:astype()
-		local view = view_type(T, cmp, size_t)
+		local view = view_type(T, size_t, cmp)
 		if lval then
 			return quote var v: view; v.elements = lval; v.len = len in v end
 		else
