@@ -283,7 +283,7 @@ local function view_type(T, size_t, cmp)
 		--memsize for caches and debugging
 
 		terra view:__memsize()
-			return sizeof(view) + sizeof(T) * self.len
+			return sizeof(T) * self.len
 		end
 
 		--sorting
