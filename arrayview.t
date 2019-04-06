@@ -469,7 +469,6 @@ low.arrview = macro(
 			return `view{}
 		end
 	end,
-	--calling it from Lua or from an escape or in a type declaration returns
-	--just the type, and you can also pass a custom C namespace.
+	--calling it from Lua returns just the type.
 	view_type
 )
