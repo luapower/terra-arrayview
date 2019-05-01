@@ -61,6 +61,9 @@ local either = macro(function(v, a, b) return `v == a or v == b end)
 
 local function view_type(T, size_t, cmp)
 
+	--unsigned sizes not supported because we use -1 to signal an invalid index.
+	assert(size_t:min() < 0)
+
 	local struct view {
 		elements: &T;
 		len: size_t; --number of valid elements
@@ -310,7 +313,7 @@ local function view_type(T, size_t, cmp)
 
 		local eq = user_cmp and macro(function(a, b) return `user_cmp(a, b) == 0 end)
 		if not eq and T.metamethods and not T.metamethods.__eq then --use memcmp
-			eq = macro(function(a, b) return `memcmp(a, b, sizeof(T)) == 0 end)
+			eq = bitequal
 		end
 		eq = eq or macro(function(a, b) return `@a == @b end)
 
@@ -445,7 +448,7 @@ local view_type = function(T, size_t, cmp)
 	end
 	assert(T)
 	size_t = size_t or int
-	cmp = cmp or (T.getmethod and T:getmethod'__cmp')
+	cmp = cmp or getmethod(T, '__cmp')
 	return view_type(T, size_t, cmp)
 end
 
