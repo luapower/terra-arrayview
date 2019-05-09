@@ -317,14 +317,23 @@ local function view_type(T, size_t, cmp)
 		end
 		eq = eq or macro(function(a, b) return `@a == @b end)
 
-		terra view:find(val: T, default: size_t)
+		view.methods.find = overload'find'
+		view.methods.find:adddefinition(terra(self: &view, val: T, default: size_t)
 			for i,v in self do
 				if eq(v, &val) then
 					return i
 				end
 			end
 			return default
-		end
+		end)
+		view.methods.find:adddefinition(terra(self: &view, val: T)
+			for i,v in self do
+				if eq(v, &val) then
+					return i
+				end
+			end
+			assert(false, 'element not found')
+		end)
 
 		terra view:count(val: T)
 			var n: size_t = 0
