@@ -461,7 +461,7 @@ local view_type = function(T, size_t, cmp)
 	return view_type(T, size_t, cmp)
 end
 
-low.arrview = macro(
+arrview = macro(
 	--calling it from Terra returns a new view.
 	function(arg1, ...)
 		local T, lval, len, size_t, cmp
@@ -485,3 +485,5 @@ low.arrview = macro(
 	--calling it from Lua returns just the type.
 	view_type
 )
+
+return _M
