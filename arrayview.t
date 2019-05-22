@@ -178,7 +178,8 @@ local function view_type(T, size_t, cmp)
 		terra view:range(i: size_t, j: size_t)
 			assert(i >= 0)
 			i = min(i, self.len)
-			j = min(max(i, j), self.len)
+			j = max(i, j)
+			j = min(j, self.len)
 			return i, j-i
 		end
 
