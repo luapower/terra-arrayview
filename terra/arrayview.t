@@ -224,7 +224,7 @@ local function view_type(T, size_t, cmp)
 					if v.len ~= self.len then
 						return iif(self.len < v.len, -1, 1)
 					end
-					return memcmp(self.elements, v.elements, self.len)
+					return bitequal(self.elements, v.elements, self.len)
 				end
 			end
 		end
